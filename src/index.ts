@@ -17,8 +17,12 @@ try {
         console.log(HELP)
     } else {
         sanitize = (message: string) => redact(message, config.authorization, config.email ?? '', config.password ?? '')
-        const log = (message: string) => console.log(`[${new Date().toISOString()}] ${sanitize(message)}`)
-        log('调度规则：市场区间开始后 1 分钟下单，每 5 分钟执行；旧的起始市场自动跳过已错过的区间')
+        const log = (message: string, level: 'info' | 'error' = 'info') => {
+            const output = `[${new Date().toISOString()}] ${level === 'error' ? '[ERROR] ' : ''}${sanitize(message)}`
+            if (level === 'error') console.error(output)
+            else console.log(output)
+        }
+        log('调度规则：启动后立即买下一个 5 分钟市场，之后每个区间开始时买下一区间；旧的起始市场自动跳过已错过的区间')
         await runBot(config, createPredictionApi(config, controller.signal, undefined, log), controller.signal, log)
     }
 } catch (error) {

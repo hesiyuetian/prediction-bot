@@ -1,6 +1,6 @@
 import type { PredictionConfig } from './config.ts'
 import { createAuthenticatedRequest } from './auth.ts'
-export { AuthorizationError, redact } from './auth.ts'
+export { AuthorizationError, formatError, redact } from './auth.ts'
 
 /** 使用原始接口响应；不依赖浏览器的 localStorage 或刷新 token 拦截器。 */
 export function createPredictionApi(config: PredictionConfig, signal: AbortSignal, fetcher: typeof fetch = fetch,

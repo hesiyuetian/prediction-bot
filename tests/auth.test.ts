@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPredictionApi, AuthorizationError } from '../src/api.ts'
-import { RecoverableAuthenticationError } from '../src/auth.ts'
+import { RecoverableAuthenticationError, redact } from '../src/auth.ts'
 import { parseConfig, type PredictionConfig } from '../src/config.ts'
 import { runBot, runCycle } from '../src/runner.ts'
 
@@ -135,7 +135,7 @@ describe('automatic login after 401', () => {
             { body: { accessToken: 'new-token' } }, { body: market }, { body: { success: true } }, { body: emptyClaims },
         ])
         let waits = 0
-        const wait = async (ms: number) => { now += ms; if (++waits === 3) controller.abort() }
+        const wait = async (ms: number) => { now += ms; if (++waits === 2) controller.abort() }
         await expect(runBot(options, api, controller.signal, log, { now: () => now, wait })).rejects.toThrow()
         const lookups = calls.filter(({ url }) => url.pathname.endsWith('getMarketDetail'))
         expect(lookups.map(({ url }) => url.searchParams.get('slug'))).toEqual([
@@ -162,6 +162,32 @@ describe('automatic login after 401', () => {
         expect(await runCycle(options, firstSlug, api, controller.signal, log)).toBe(false)
         const messages = log.mock.calls.flat().join(' ')
         for (const secret of ['old-token', 'new-token', env.PREDICTION_EMAIL, env.PREDICTION_PASSWORD]) expect(messages).not.toContain(secret)
+    })
+
+    it('keeps the original 401 response and login error details when login fails', async () => {
+        const { api, options, controller, log } = mockApi([
+            { body: { message: 'session expired', accessToken: 'hidden-expired-token' }, status: 401 },
+            { body: { message: 'login service unavailable', password: 'hidden-password' }, status: 503 },
+        ])
+        expect(await runCycle(options, firstSlug, api, controller.signal, log)).toBe(false)
+        const messages = log.mock.calls.map(([message]) => String(message)).join('\n')
+        expect(messages).toContain('session expired')
+        expect(messages).toContain('HTTP 状态：401')
+        expect(messages).toContain('login service unavailable')
+        expect(messages).toContain('HTTP 状态：503')
+        expect(messages).not.toContain('hidden-expired-token')
+        expect(messages).not.toContain('hidden-password')
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('报错日志：'), 'error')
+    })
+
+    it('redacts escaped passwords and unknown token fields before error JSON is printed', () => {
+        const password = 'quoted "secret"\npassword'
+        const raw = JSON.stringify({ message: `invalid password ${password}`, nested: { refreshToken: 'hidden-refresh-token', access_token: 'hidden-access-token' } })
+        const masked = redact(raw, password)
+        expect(masked).not.toContain(JSON.stringify(password).slice(1, -1))
+        expect(masked).not.toContain('hidden-refresh-token')
+        expect(masked).not.toContain('hidden-access-token')
+        expect(masked).toContain('[REDACTED]')
     })
 
     it('does not retry unknown order failures or log in for non-401 errors', async () => {

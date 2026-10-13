@@ -1,7 +1,6 @@
 import { parseArgs } from 'node:util'
 
 export const INTERVAL_SECONDS = 300
-export const ORDER_DELAY_SECONDS = 60
 export const DEFAULT_PROJECT_ID = '816d6686-3c64-4a98-bf41-9e781b77270e'
 
 export interface PredictionConfig {
@@ -24,7 +23,7 @@ export const HELP = `每 5 分钟拆分下单并领取已结算市场。
 用法:
   pnpm start --base-url https://your-host/api \\
     --wallet-id <walletId> --amount 10 --stop-price 0.1 \\
-    --slug btc-updown-5m-1791787500
+    --slug btc-updown-5m-
 
 参数（同名参数优先于环境变量）:
   --base-url        接口根地址，包含 /api 等实际前缀；PREDICTION_BASE_URL
@@ -34,13 +33,13 @@ export const HELP = `每 5 分钟拆分下单并领取已结算市场。
   --wallet-id       钱包 ID；PREDICTION_WALLET_ID
   --amount          每轮下单数量，必须 > 0；PREDICTION_AMOUNT
   --stop-price      止损价，必须在 0 和 1 之间；PREDICTION_STOP_PRICE
-  --slug            起始 5 分钟市场，至少从其时间戳 +300 开始，过期区间自动跳过；PREDICTION_SLUG
+  --slug            btc-updown-5m- 自动计算下一个市场；也支持完整起始 slug；PREDICTION_SLUG
   --project-id      领取项目；PREDICTION_PROJECT_ID，默认 ${DEFAULT_PROJECT_ID}
   --once            只执行一轮
   --dry-run         读取接口并打印计划，不发送拆分或领取 POST
   --help            显示帮助
 
-等待下一个市场区间开始后 1 分钟执行（每小时 01、06、11、16、21、26…分）；Ctrl+C 停止。
+启动后立即购买下一个 5 分钟市场；之后每个区间开始时买下一区间（每小时 00、05、10、15、20、25…分）；Ctrl+C 停止。
 推荐通过 .env 或环境变量传入 token、邮箱和密码。`
 
 export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env): PredictionConfig | null {
@@ -85,12 +84,15 @@ export function parseConfig(args: string[], env: NodeJS.ProcessEnv = process.env
         throw new Error('--stop-price 必须大于 0 且小于 1')
     }
     const slug = required('slug', 'PREDICTION_SLUG')
-    const match = /^(btc-updown-5m-)(\d+)$/.exec(slug)
-    const timestamp = Number(match?.[2])
+    const match = /^(btc-updown-5m-)(\d+)?$/.exec(slug)
+    // 只给前缀时用当前区间作为起点，下一个区间就是首次目标市场。
+    const timestamp = match?.[2] === undefined
+        ? Math.floor(Date.now() / (INTERVAL_SECONDS * 1000)) * INTERVAL_SECONDS
+        : Number(match[2])
     if (!match || !Number.isSafeInteger(timestamp) || timestamp <= 0 || timestamp % INTERVAL_SECONDS !== 0
         || !Number.isSafeInteger((timestamp + INTERVAL_SECONDS) * 1000)
         || !Number.isFinite(new Date((timestamp + INTERVAL_SECONDS) * 1000).getTime())) {
-        throw new Error('--slug 必须为 btc-updown-5m-<Unix 秒时间戳>，且时间戳对齐 300 秒')
+        throw new Error('--slug 必须为 btc-updown-5m- 或 btc-updown-5m-<Unix 秒时间戳>，时间戳须对齐 300 秒')
     }
     return {
         baseUrl: url.href.replace(/\/+$/, ''), authorization: token ? `Bearer ${token}` : '',
